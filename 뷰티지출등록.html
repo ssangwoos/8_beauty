@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>8_beauty 지출내역서</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body { 
+            font-family: sans-serif; 
+            padding: 20px; 
+        }
+        label { 
+            display: block; 
+            margin-top: 10px; 
+        }
+        /* 모든 입력 관련 요소에 대한 스타일 */
+        input[type="date"], 
+        input[type="number"], 
+        select, 
+        input[type="text"], 
+        textarea {
+            width: 95%;                  
+            padding: 8px;                
+            margin-top: 5px;             
+            max-width: 400px;            
+            border: 1px solid #ccc;      
+            box-sizing: border-box;      
+            vertical-align: middle;      
+        }
+        /* 버튼 스타일 수정 */
+        button {
+            margin-top: 20px;
+            padding: 10px 15px;          /* 버튼 내부 여백 (크기 조절 가능) */
+            cursor: pointer;
+            /* width: 95%; 삭제됨 */     /* 버튼 너비를 자동으로 조절하도록 함 */
+            /* max-width: 400px; 삭제됨 */
+            border: 1px solid #ccc;      /* 테두리 유지 (선택 사항) */
+            background-color: #f8f8f8; /* 기본 배경색 (선택 사항) */
+            border-radius: 4px;         /* 약간 둥근 모서리 (선택 사항) */
+        }
+        button:hover {
+             background-color: #e8e8e8; /* 마우스 올렸을 때 배경색 변경 (선택 사항) */
+        }
+
+        /* 메시지 영역 스타일 */
+        #message { 
+            margin-top: 15px; 
+            font-weight: bold; 
+        }
+    </style>
+</head>
+<body>
+    <h1>8_beauty 지출내역서</h1>
+    <form id="expenseForm">
+        <label for="date">날짜:</label>
+        <input type="date" id="date" name="date" required>
+
+        <label for="amount">금액:</label>
+        <input type="number" id="amount" name="amount" required>
+
+        <label for="item">항목:</label>
+        <input type="text" id="item" name="item" required> 
+        <label for="type">구분:</label>
+        <select id="type" name="type" required>
+            <option value="지출">지출</option>
+            <option value="수입">수입</option>
+        </select>
+
+        <label for="paymentMethod">지불수단:</label>
+        <select id="paymentMethod" name="paymentMethod" required>
+            <option value="카드">카드</option>
+            <option value="이체">이체</option>
+        </select>
+
+	<label for="detailedPaymentMethod">세부지불수단:</label>
+        <select id="detailedPaymentMethod" name="detailedPaymentMethod"> 
+            <option value="">-</option> {/* '이체' 선택 시 선택될 빈 값 옵션 추가 */}
+            <option value="댄공150">댄공150</option>
+            <option value="아멕스">아멕스</option>
+            <option value="국민">국민</option>
+        </select>
+
+        <label for="notes">비고:</label>
+        <textarea id="notes" name="notes" rows="3">신협에서 이체해야함</textarea> 
+
+        <button type="submit">시트에 추가</button>
+    </form>
+
+    <div id="message"></div>
+
+    <script>
+        const form = document.getElementById('expenseForm');
+        const messageDiv = document.getElementById('message');
+        const dateInput = document.getElementById('date'); // 날짜 input 요소 가져오기
+        const notesInput = document.getElementById('notes'); // 비고 textarea 요소 가져오기
+        const defaultNotesValue = '신협에서 이체해야함'; // 비고 기본값 저장
+        const webAppUrl = 'https://script.google.com/macros/s/AKfycbz_cEvK4y5sX3UnhC6aWVLhMoBErEvZdfR3eTw0TnJFH8e8KIyFVI1Y2LEGo9i5hGJ-sQ/exec'; // 여기에 Apps Script 웹 앱 URL을 붙여넣으세요.
+
+        // --- 페이지 로드 시 오늘 날짜를 기본값으로 설정 ---
+        document.addEventListener('DOMContentLoaded', (event) => {
+            const today = new Date();
+            // YYYY-MM-DD 형식으로 변환 (ISO 문자열 활용 및 시간대 오차 보정)
+            const offset = today.getTimezoneOffset();
+            const todayLocal = new Date(today.getTime() - (offset*60*1000));
+            const formattedDate = todayLocal.toISOString().slice(0, 10); 
+            dateInput.value = formattedDate;
+            
+            // 비고 필드 기본값 설정 (혹시 textarea 태그에서 빠졌을 경우 대비)
+            if (!notesInput.value) {
+                 notesInput.value = defaultNotesValue;
+            }
+        });
+        // --- 오늘 날짜 설정 끝 ---
+
+        // --- 엔터 키 입력 시 폼 제출 방지 ---
+        form.addEventListener('keydown', function(e) {
+            // 모든 input, select, textarea 에서 엔터 키(keyCode 13)를 누르면
+            if (e.key === 'Enter' || e.keyCode === 13) {
+                // 기본 동작(폼 제출)을 막음
+                e.preventDefault();
+                // 추가: 원한다면 다음 필드로 포커스 이동 등의 로직도 추가 가능
+                return false; 
+            }
+        });
+        // --- 엔터 키 방지 끝 ---
+
+        // --- 폼 제출 로직 (버튼 클릭 시) ---
+        form.addEventListener('submit', function(e) {
+            e.preventDefault(); 
+            messageDiv.textContent = '전송 중...'; 
+            messageDiv.style.color = 'black'; // 메시지 색상 초기화
+
+            const formData = new FormData(form);
+
+            fetch(webAppUrl, {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json()) 
+            .then(data => {
+                if (data.result === "success") {
+                    messageDiv.textContent = data.message;
+                    messageDiv.style.color = 'green';
+                    form.reset(); 
+                    // 폼 리셋 후 날짜와 비고 기본값 다시 설정
+                    const today = new Date();
+                    const offset = today.getTimezoneOffset();
+                    const todayLocal = new Date(today.getTime() - (offset*60*1000));
+                    dateInput.value = todayLocal.toISOString().slice(0, 10); 
+                    notesInput.value = defaultNotesValue; 
+                } else {
+                    messageDiv.textContent = data.message;
+                    messageDiv.style.color = 'red';
+                }
+                console.log(data); 
+            })
+            .catch(error => {
+                messageDiv.textContent = '오류 발생: ' + error;
+                messageDiv.style.color = 'red';
+                console.error('Error:', error);
+            });
+        });
+        // --- 폼 제출 로직 끝 ---
+
+	// --- 지불수단 변경 감지 로직 추가 ---
+        const paymentMethodSelect = document.getElementById('paymentMethod');
+        const detailedPaymentMethodSelect = document.getElementById('detailedPaymentMethod');
+
+        paymentMethodSelect.addEventListener('change', function() {
+            if (this.value === '이체') {
+                // 지불수단이 '이체'이면 세부지불수단의 값을 빈 값("") 옵션으로 설정
+                detailedPaymentMethodSelect.value = ""; 
+                // 선택 사항: '이체'일 때 세부지불수단 드롭다운을 비활성화할 수도 있음
+                // detailedPaymentMethodSelect.disabled = true; 
+            } else {
+                // '이체'가 아니면 세부지불수단 드롭다운을 다시 활성화 (만약 비활성화 했다면)
+                // detailedPaymentMethodSelect.disabled = false;
+                // 선택 사항: 다른 지불수단 선택 시 세부지불수단 기본값 설정 (예: 첫번째 옵션)
+                // if (detailedPaymentMethodSelect.value === "") {
+                //    detailedPaymentMethodSelect.selectedIndex = 1; // '-' 다음 옵션 선택
+                // }
+            }
+        });
+        // --- 지불수단 변경 감지 로직 끝 ---
+    </script>
+</body>
+</html>
