@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>디자인 업무현황</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
+    <style>
+        .ghost { opacity: 0.3; background: #f0f7ff; border: 2px dashed #3b82f6; }
+        .line-through { text-decoration: line-through; color: #94a3b8; opacity: 0.5; }
+        /* 접힘 상태 스타일 */
+        .collapsed-content { display: none; }
+        .toggle-icon { transition: transform 0.2s; display: inline-block; }
+        .is-collapsed .toggle-icon { transform: rotate(-90deg); }
+
+        /* 하이퍼링크 스타일 */
+        .task-link { 
+            color: #2563eb !important; 
+            text-decoration: underline !important; 
+            font-weight: 600; 
+            cursor: pointer !important;
+        }
+
+        /* 드래그 모드 스타일 */
+        body.dragging-mode .collapsed-content { 
+            display: block !important; 
+            min-height: 60px; 
+            border: 2px dashed #3b82f6; 
+            background: #f8fafc;
+            border-radius: 0 0 12px 12px;
+        }
+        body.dragging-mode .collapsed-content .task-card,
+        body.dragging-mode .collapsed-content .quick-area {
+            display: none !important; 
+        }
+        .task-card img { max-width: 200px; border-radius: 6px; margin-top: 8px; border: 1px solid #e2e8f0; cursor: zoom-in; }
+    </style>
+</head>
+<body class="bg-[#f0f2f5] p-4 md:p-8">
+
+    <header class="max-w-4xl mx-auto mb-8 text-center">
+        <h1 class="text-2xl font-bold text-slate-800 mb-6">디자인-김지원 업무현황</h1>
+        <div class="flex flex-wrap gap-2 p-4 bg-white rounded-xl shadow-sm border border-slate-200 text-left">
+            <input id="new-task-title" type="text" placeholder="업무 내용 입력 (이미지는 Ctrl+V)" 
+                   class="flex-1 min-w-[200px] p-2 bg-slate-50 rounded-lg border-none outline-none text-sm">
+            <input id="new-task-date" type="date" class="p-2 bg-slate-50 rounded-lg border-none outline-none text-sm">
+            <button id="add-btn" class="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-blue-700 text-sm shadow-md">추가</button>
+        </div>
+    </header>
+
+    <main id="board" class="max-w-4xl mx-auto flex flex-col gap-4 pb-24"></main>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getFirestore, collection, onSnapshot, updateDoc, doc, addDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyDYjnMVCoV7siAWPBlXCAmxxniFrSNlGg",
+            authDomain: "todolist-db16c.firebaseapp.com",
+            projectId: "todolist-db16c",
+            storageBucket: "todolist-db16c.firebasestorage.app",
+            messagingSenderId: "882821223652",
+            appId: "1:882821223652:web:a17f286a91ebf4751488f1"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const tasksCol = collection(db, "tasks");
+
+        const collapsedDates = new Set();
+        document.getElementById("new-task-date").value = new Date().toISOString().substring(0, 10);
+
+        // 링크 이동 함수
+        window.safeGo = function(url) {
+            var target = url.trim();
+            if (target.indexOf("http") !== 0) target = "https://" + target;
+            window.open(target, "_blank");
+        };
+
+        // 이미지 확대 함수
+        window.zoomImg = function(imgSrc) {
+            const win = window.open("");
+            const img = win.document.createElement("img");
+            img.src = imgSrc;
+            img.style.maxWidth = "100%";
+            img.style.maxHeight = "100vh";
+            win.document.body.style.margin = "0";
+            win.document.body.style.background = "#000";
+            win.document.body.style.display = "flex";
+            win.document.body.style.justifyContent = "center";
+            win.document.body.style.alignItems = "center";
+            win.document.body.appendChild(img);
+        };
+
+        // [핵심] 주소 인식 함수 (슬래시 오류 방지 버전)
+        function linkify(text) {
+            if (!text) return "";
+            var pattern = new RegExp("((https?:\\/\\/)|(www\\.)|([a-zA-Z0-9.-]+\\.(com|net|org|kr|io|me|co.kr)[^\\s]*))", "gi");
+            return text.replace(pattern, function(url) {
+                // 링크 부분은 contenteditable="false"를 주어 클릭이 먹히게 함
+                return '<span class="task-link" contenteditable="false" onclick="window.safeGo(\'' + url + '\'); event.stopPropagation();">' + url + '</span>';
+            });
+        }
+
+        onSnapshot(tasksCol, function(snapshot) {
+            const board = document.getElementById("board");
+            const dataMap = {};
+
+            snapshot.forEach(function(d) {
+                const task = d.data();
+                if (!dataMap[task.date]) dataMap[task.date] = [];
+                dataMap[task.date].push({ id: d.id, title: task.title, done: task.done });
+            });
+
+            const sortedDates = Object.keys(dataMap).sort(function(a, b) {
+                return new Date(b) - new Date(a);
+            });
+
+            board.innerHTML = "";
+
+            sortedDates.forEach(function(date) {
+                const block = document.createElement("div");
+                block.className = "w-full bg-white rounded-xl border border-slate-300 shadow-sm overflow-hidden mb-2";
+                if (collapsedDates.has(date)) block.classList.add("is-collapsed");
+
+                const header = document.createElement("div");
+                header.className = "p-4 bg-slate-50 flex items-center justify-between border-b cursor-pointer hover:bg-slate-100";
+                
+                const titleWrap = document.createElement("div");
+                titleWrap.className = "flex items-center gap-3";
+                
+                const arrow = document.createElement("span");
+                arrow.className = "toggle-icon text-slate-400";
+                arrow.innerText = "▼";
+                
+                const dateText = document.createElement("span");
+                dateText.className = "font-bold text-slate-700";
+                dateText.innerText = "📅 " + date;
+                
+                titleWrap.appendChild(arrow);
+                titleWrap.appendChild(dateText);
+                
+                const countBadge = document.createElement("span");
+                countBadge.className = "text-[10px] bg-slate-200 px-2 py-0.5 rounded-full";
+                countBadge.innerText = dataMap[date].length + "개";
+                
+                header.appendChild(titleWrap);
+                header.appendChild(countBadge);
+                
+                const contentContainer = document.createElement("div");
+                contentContainer.className = "content-body";
+                if (collapsedDates.has(date)) contentContainer.classList.add("collapsed-content");
+
+                header.onclick = function() {
+                    if (collapsedDates.has(date)) collapsedDates.delete(date);
+                    else collapsedDates.add(date);
+                    block.classList.toggle("is-collapsed");
+                    contentContainer.classList.toggle("collapsed-content");
+                };
+                
+                block.appendChild(header);
+
+                const list = document.createElement("div");
+                list.id = date;
+                list.className = "task-list p-4 space-y-3";
+                
+                dataMap[date].forEach(function(task) {
+                    const card = document.createElement("div");
+                    card.className = "task-card p-3 border border-slate-100 rounded-lg flex items-start gap-3 bg-white hover:border-blue-200 relative";
+                    card.setAttribute("data-id", task.id);
+                    
+                    const chk = document.createElement("input");
+                    chk.type = "checkbox";
+                    chk.className = "mt-1 w-5 h-5 rounded cursor-pointer";
+                    chk.checked = task.done;
+                    chk.onchange = function() { updateDoc(doc(db, "tasks", task.id), { done: chk.checked }); };
+                    card.appendChild(chk);
+
+                    const content = document.createElement("div");
+                    content.className = "flex-1 text-sm text-slate-700";
+                    if (task.done) content.classList.add("line-through");
+
+                    const isImg = task.title && task.title.indexOf("data:image") === 0;
+                    if (isImg) {
+                        const img = document.createElement("img");
+                        img.src = task.title;
+                        img.onclick = function(e) { e.stopPropagation(); window.zoomImg(img.src); };
+                        content.appendChild(img);
+                    } else {
+                        // [해결] 링크 인식 결과물을 innerHTML로 삽입
+                        content.innerHTML = linkify(task.title);
+                        content.contentEditable = "true";
+                        content.style.outline = "none";
+                        content.onblur = function() {
+                            // 수정 시에는 텍스트만 추출해서 저장
+                            var newText = content.innerText;
+                            if (newText !== task.title) updateDoc(doc(db, "tasks", task.id), { title: newText });
+                        };
+                    }
+                    card.appendChild(content);
+
+                    const del = document.createElement("button");
+                    del.innerText = "✕";
+                    del.className = "text-slate-300 hover:text-red-500 font-bold px-1";
+                    del.onclick = function(e) {
+                        e.stopPropagation();
+                        if (confirm("삭제하시겠습니까?")) deleteDoc(doc(db, "tasks", task.id));
+                    };
+                    card.appendChild(del);
+
+                    list.appendChild(card);
+                });
+                
+                contentContainer.appendChild(list);
+
+                const quickArea = document.createElement("div");
+                quickArea.className = "quick-area p-4 bg-slate-50 border-t";
+                const qIn = document.createElement("input");
+                qIn.className = "w-full p-2 text-xs border border-slate-200 rounded-lg outline-none bg-white";
+                qIn.placeholder = "+ 업무 바로 추가 (Enter)";
+                qIn.onkeypress = function(e) {
+                    if (e.key === "Enter" && qIn.value) {
+                        addDoc(tasksCol, { title: qIn.value, date: date, done: false, createdAt: Date.now() });
+                        qIn.value = "";
+                    }
+                };
+                quickArea.appendChild(qIn);
+                contentContainer.appendChild(quickArea);
+
+                block.appendChild(contentContainer);
+                board.appendChild(block);
+
+                new Sortable(list, {
+                    group: "tasks", animation: 150, filter: "[contenteditable='true'], img, input, button", preventOnFilter: false,
+                    onStart: function() { document.body.classList.add("dragging-mode"); },
+                    onEnd: function(evt) {
+                        document.body.classList.remove("dragging-mode");
+                        if (evt.to.id) updateDoc(doc(db, "tasks", evt.item.getAttribute("data-id")), { date: evt.to.id });
+                    }
+                });
+            });
+        });
+
+        window.addEventListener("paste", function(e) {
+            const items = e.clipboardData.items;
+            for (let i = 0; i < items.length; i++) {
+                if (items[i].type.indexOf("image") !== -1) {
+                    const reader = new FileReader();
+                    reader.onload = function(event) {
+                        const img = new Image();
+                        img.src = event.target.result;
+                        img.onload = function() {
+                            const cvs = document.createElement("canvas");
+                            const maxW = 800;
+                            let w = img.width, h = img.height;
+                            if (w > maxW) { h *= maxW / w; w = maxW; }
+                            cvs.width = w; cvs.height = h;
+                            cvs.getContext("2d").drawImage(img, 0, 0, w, h);
+                            addDoc(tasksCol, { title: cvs.toDataURL('image/jpeg', 0.7), date: document.getElementById("new-task-date").value, done: false, createdAt: Date.now() });
+                        };
+                    };
+                    reader.readAsDataURL(items[i].getAsFile());
+                }
+            }
+        });
+
+        document.getElementById("add-btn").onclick = function() {
+            const t = document.getElementById("new-task-title"), d = document.getElementById("new-task-date");
+            if (t.value) {
+                addDoc(tasksCol, { title: t.value, date: d.value, done: false, createdAt: Date.now() });
+                t.value = "";
+            }
+        };
+    </script>
+</body>
+</html>
